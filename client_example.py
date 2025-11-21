@@ -180,6 +180,10 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="FLUX Kontext API Client")
+    # Common arguments (must come first)
+    parser.add_argument("--server", type=str, default="http://localhost:8000")
+    parser.add_argument("--api-key", type=str, default="")
+
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # Generate command
@@ -201,10 +205,6 @@ if __name__ == "__main__":
     edit_parser.add_argument("--steps", type=int, default=50)
     edit_parser.add_argument("--guidance", type=float, default=2.5)
     edit_parser.add_argument("--seed", type=int, default=None)
-
-    # Common arguments
-    parser.add_argument("--server", type=str, default="http://localhost:8000")
-    parser.add_argument("--api-key", type=str, default="")
 
     args = parser.parse_args()
 
