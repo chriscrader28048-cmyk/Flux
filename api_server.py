@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-FLUX.1-dev API Server
-FastAPI-based REST API for image generation
+FLUX.1-Kontext-dev API Server
+FastAPI-based REST API for image editing with context
 """
 
 import os
 import io
 import base64
 import torch
+import requests as http_requests
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -17,15 +18,15 @@ from PIL import Image
 import uvicorn
 
 app = FastAPI(
-    title="FLUX.1-dev API",
-    description="API for generating images with FLUX.1-dev model",
+    title="FLUX.1-Kontext-dev API",
+    description="API for image editing with FLUX.1-Kontext-dev model",
     version="1.0.0"
 )
 
 # CORS for client access
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure for your clients
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,13 +44,21 @@ async def verify_api_key(x_api_key: str = Header(None)):
 # Global model variable
 pipe = None
 
-class GenerationRequest(BaseModel):
+class EditRequest(BaseModel):
+    prompt: str = Field(..., description="Text prompt describing the edit")
+    input_image: Optional[str] = Field(None, description="Base64 encoded input image")
+    image_url: Optional[str] = Field(None, description="URL of input image")
+    num_inference_steps: int = Field(50, ge=1, le=100, description="Number of inference steps")
+    guidance_scale: float = Field(2.5, ge=0, le=20, description="Guidance scale")
+    seed: Optional[int] = Field(None, description="Random seed for reproducibility")
+    output_format: str = Field("png", description="Output format: png, jpeg, base64")
+
+class GenerateRequest(BaseModel):
     prompt: str = Field(..., description="Text prompt for image generation")
-    negative_prompt: Optional[str] = Field("", description="Negative prompt")
     width: int = Field(1024, ge=256, le=2048, description="Image width")
     height: int = Field(1024, ge=256, le=2048, description="Image height")
     num_inference_steps: int = Field(50, ge=1, le=100, description="Number of inference steps")
-    guidance_scale: float = Field(3.5, ge=0, le=20, description="Guidance scale")
+    guidance_scale: float = Field(2.5, ge=0, le=20, description="Guidance scale")
     seed: Optional[int] = Field(None, description="Random seed for reproducibility")
     output_format: str = Field("png", description="Output format: png, jpeg, base64")
 
@@ -59,16 +68,16 @@ class GenerationResponse(BaseModel):
     image_base64: Optional[str] = None
     seed: Optional[int] = None
 
-def load_model(model_path: str = "./models/flux-dev"):
-    """Load FLUX model"""
+def load_model(model_path: str = "./models/flux-kontext-dev"):
+    """Load FLUX Kontext model"""
     global pipe
 
     try:
-        from diffusers import FluxPipeline
+        from diffusers import FluxKontextPipeline
 
-        print(f"Loading FLUX model from {model_path}...")
+        print(f"Loading FLUX Kontext model from {model_path}...")
 
-        pipe = FluxPipeline.from_pretrained(
+        pipe = FluxKontextPipeline.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
         )
@@ -80,7 +89,7 @@ def load_model(model_path: str = "./models/flux-dev"):
             print("CUDA not available, using CPU (will be slow)")
 
         # Enable memory optimizations
-        pipe.enable_attention_slicing()
+        pipe.enable_model_cpu_offload()
 
         print("Model loaded successfully!")
         return True
@@ -92,8 +101,7 @@ def load_model(model_path: str = "./models/flux-dev"):
 @app.on_event("startup")
 async def startup_event():
     """Load model on startup"""
-    import os
-    model_path = os.environ.get("FLUX_MODEL_PATH", "./models/flux-dev")
+    model_path = os.environ.get("FLUX_MODEL_PATH", "./models/flux-kontext-dev")
     if not load_model(model_path):
         print("Warning: Model not loaded. Please ensure model is downloaded.")
 
@@ -102,6 +110,7 @@ async def root():
     """Health check endpoint"""
     return {
         "status": "running",
+        "model": "FLUX.1-Kontext-dev",
         "model_loaded": pipe is not None,
         "cuda_available": torch.cuda.is_available()
     }
@@ -111,16 +120,89 @@ async def health():
     """Health check"""
     return {"status": "healthy", "model_loaded": pipe is not None}
 
+def load_image_from_source(input_image: str = None, image_url: str = None) -> Image.Image:
+    """Load image from base64 or URL"""
+    if input_image:
+        # Decode base64 image
+        img_data = base64.b64decode(input_image)
+        return Image.open(io.BytesIO(img_data)).convert("RGB")
+    elif image_url:
+        # Download from URL
+        response = http_requests.get(image_url, timeout=30)
+        response.raise_for_status()
+        return Image.open(io.BytesIO(response.content)).convert("RGB")
+    else:
+        return None
+
+@app.post("/edit", response_model=GenerationResponse)
+async def edit_image(request: EditRequest, auth: bool = Depends(verify_api_key)):
+    """Edit image with text prompt (image-to-image)"""
+    global pipe
+
+    if pipe is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    if not request.input_image and not request.image_url:
+        raise HTTPException(status_code=400, detail="Either input_image or image_url is required")
+
+    try:
+        # Load input image
+        input_img = load_image_from_source(request.input_image, request.image_url)
+
+        # Set seed
+        generator = None
+        seed = request.seed
+        if seed is not None:
+            generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu")
+            generator.manual_seed(seed)
+        else:
+            seed = torch.randint(0, 2**32, (1,)).item()
+
+        # Generate edited image
+        result = pipe(
+            image=input_img,
+            prompt=request.prompt,
+            num_inference_steps=request.num_inference_steps,
+            guidance_scale=request.guidance_scale,
+            generator=generator
+        )
+
+        image = result.images[0]
+
+        # Return result
+        if request.output_format == "base64":
+            buffered = io.BytesIO()
+            image.save(buffered, format="PNG")
+            img_base64 = base64.b64encode(buffered.getvalue()).decode()
+
+            return GenerationResponse(
+                success=True,
+                message="Image edited successfully",
+                image_base64=img_base64,
+                seed=seed
+            )
+        else:
+            buffered = io.BytesIO()
+            fmt = "PNG" if request.output_format == "png" else "JPEG"
+            image.save(buffered, format=fmt)
+            buffered.seek(0)
+
+            media_type = f"image/{request.output_format}"
+            return Response(content=buffered.getvalue(), media_type=media_type)
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/generate", response_model=GenerationResponse)
-async def generate_image(request: GenerationRequest, auth: bool = Depends(verify_api_key)):
-    """Generate image from text prompt"""
+async def generate_image(request: GenerateRequest, auth: bool = Depends(verify_api_key)):
+    """Generate image from text prompt (text-to-image)"""
     global pipe
 
     if pipe is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
-        # Set seed for reproducibility
+        # Set seed
         generator = None
         seed = request.seed
         if seed is not None:
@@ -141,7 +223,7 @@ async def generate_image(request: GenerationRequest, auth: bool = Depends(verify
 
         image = result.images[0]
 
-        # Convert to requested format
+        # Return result
         if request.output_format == "base64":
             buffered = io.BytesIO()
             image.save(buffered, format="PNG")
@@ -154,7 +236,6 @@ async def generate_image(request: GenerationRequest, auth: bool = Depends(verify
                 seed=seed
             )
         else:
-            # Return image directly
             buffered = io.BytesIO()
             fmt = "PNG" if request.output_format == "png" else "JPEG"
             image.save(buffered, format=fmt)
@@ -166,58 +247,19 @@ async def generate_image(request: GenerationRequest, auth: bool = Depends(verify
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/generate/batch")
-async def generate_batch(prompts: list[str], settings: Optional[GenerationRequest] = None):
-    """Generate multiple images from prompts"""
-    global pipe
-
-    if pipe is None:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-
-    results = []
-    for prompt in prompts:
-        try:
-            result = pipe(
-                prompt=prompt,
-                height=settings.height if settings else 1024,
-                width=settings.width if settings else 1024,
-                num_inference_steps=settings.num_inference_steps if settings else 50,
-                guidance_scale=settings.guidance_scale if settings else 3.5,
-            )
-
-            image = result.images[0]
-            buffered = io.BytesIO()
-            image.save(buffered, format="PNG")
-            img_base64 = base64.b64encode(buffered.getvalue()).decode()
-
-            results.append({
-                "prompt": prompt,
-                "success": True,
-                "image_base64": img_base64
-            })
-        except Exception as e:
-            results.append({
-                "prompt": prompt,
-                "success": False,
-                "error": str(e)
-            })
-
-    return {"results": results}
-
 def main():
     """Run API server"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="FLUX API Server")
+    parser = argparse.ArgumentParser(description="FLUX Kontext API Server")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host address")
     parser.add_argument("--port", type=int, default=8000, help="Port number")
-    parser.add_argument("--model-path", type=str, default="./models/flux-dev",
+    parser.add_argument("--model-path", type=str, default="./models/flux-kontext-dev",
                         help="Path to FLUX model")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
 
     args = parser.parse_args()
 
-    import os
     os.environ["FLUX_MODEL_PATH"] = args.model_path
 
     uvicorn.run(
