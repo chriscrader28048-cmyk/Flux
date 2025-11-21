@@ -77,11 +77,12 @@ def load_model(model_path: str = "./models/flux-kontext-dev"):
 
         print(f"Loading FLUX Kontext model...")
 
-        # Try loading from HuggingFace hub directly
+        # Load from HuggingFace hub
+        hf_token = os.environ.get("HF_TOKEN")
         pipe = FluxKontextPipeline.from_pretrained(
             "black-forest-labs/FLUX.1-Kontext-dev",
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-            cache_dir=model_path
+            token=hf_token
         )
 
         if torch.cuda.is_available():
