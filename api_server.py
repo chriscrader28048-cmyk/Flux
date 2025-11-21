@@ -73,11 +73,19 @@ def load_model(model_path: str = "./models/flux-kontext-dev"):
     global pipe
 
     try:
-        from diffusers import FluxKontextPipeline
+        # Try FluxKontextPipeline first, fallback to FluxPipeline
+        try:
+            from diffusers import FluxKontextPipeline
+            pipeline_class = FluxKontextPipeline
+            print("Using FluxKontextPipeline")
+        except ImportError:
+            from diffusers import FluxPipeline
+            pipeline_class = FluxPipeline
+            print("FluxKontextPipeline not available, using FluxPipeline")
 
         print(f"Loading FLUX Kontext model from {model_path}...")
 
-        pipe = FluxKontextPipeline.from_pretrained(
+        pipe = pipeline_class.from_pretrained(
             model_path,
             torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
         )
@@ -87,9 +95,6 @@ def load_model(model_path: str = "./models/flux-kontext-dev"):
             print("Model loaded on CUDA")
         else:
             print("CUDA not available, using CPU (will be slow)")
-
-        # Enable memory optimizations
-        pipe.enable_model_cpu_offload()
 
         print("Model loaded successfully!")
         return True
