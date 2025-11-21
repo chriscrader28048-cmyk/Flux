@@ -7,8 +7,20 @@ FastAPI-based REST API for image editing with context
 import os
 import io
 import base64
+import socket
 import torch
 import requests as http_requests
+
+def get_local_ip():
+    """Get local IP address"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except:
+        return "127.0.0.1"
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
@@ -262,6 +274,17 @@ def main():
     args = parser.parse_args()
 
     os.environ["FLUX_MODEL_PATH"] = args.model_path
+
+    # Show IP addresses for client access
+    local_ip = get_local_ip()
+    print("\n" + "="*50)
+    print("FLUX.1-Kontext-dev API Server")
+    print("="*50)
+    print(f"Local:   http://localhost:{args.port}")
+    print(f"Network: http://{local_ip}:{args.port}")
+    print("="*50)
+    print("Clients can connect using the Network address above")
+    print("="*50 + "\n")
 
     uvicorn.run(
         "api_server:app",
