@@ -86,8 +86,9 @@ def load_model(model_path: str = "./models/flux-kontext-dev"):
         )
 
         if torch.cuda.is_available():
-            pipe = pipe.to("cuda")
-            print("Model loaded on CUDA")
+            # Use CPU offload to save VRAM (for GPUs < 24GB)
+            pipe.enable_model_cpu_offload()
+            print("Model loaded with CPU offload (memory efficient)")
         else:
             print("CUDA not available, using CPU (will be slow)")
 
