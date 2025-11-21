@@ -1,0 +1,26 @@
+# FLUX API Server Requirements
+
+# Core dependencies
+torch>=2.0.0
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+
+# API Server
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+
+# Image processing
+Pillow>=10.0.0
+
+# Hugging Face
+huggingface-hub>=0.20.0
+
+# Client
+requests>=2.31.0
+
+# Optional: for better performance
+# xformers>=0.0.23
+# sentencepiece>=0.1.99
