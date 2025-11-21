@@ -7,8 +7,9 @@ import requests
 import base64
 from pathlib import Path
 
-# API Server URL
+# API Server Configuration
 API_URL = "http://localhost:8000"
+API_KEY = ""  # Set your API key here or use --api-key argument
 
 def check_health():
     """Check if API server is running"""
@@ -56,9 +57,14 @@ def generate_image(
         payload["seed"] = seed
 
     try:
+        headers = {}
+        if API_KEY:
+            headers["X-API-Key"] = API_KEY
+
         response = requests.post(
             f"{API_URL}/generate",
             json=payload,
+            headers=headers,
             timeout=300  # 5 minutes timeout for generation
         )
 
@@ -157,10 +163,12 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--server", type=str, default="http://localhost:8000",
                         help="API server URL")
+    parser.add_argument("--api-key", type=str, default="", help="API key for authentication")
 
     args = parser.parse_args()
 
     API_URL = args.server
+    API_KEY = args.api_key
 
     # Check server health
     health = check_health()

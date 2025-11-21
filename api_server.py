@@ -4,10 +4,12 @@ FLUX.1-dev API Server
 FastAPI-based REST API for image generation
 """
 
+import os
 import io
 import base64
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -19,6 +21,24 @@ app = FastAPI(
     description="API for generating images with FLUX.1-dev model",
     version="1.0.0"
 )
+
+# CORS for client access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure for your clients
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# API Key authentication
+API_KEY = os.environ.get("FLUX_API_KEY", "")
+
+async def verify_api_key(x_api_key: str = Header(None)):
+    """Verify API key if configured"""
+    if API_KEY and x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    return True
 
 # Global model variable
 pipe = None
@@ -92,7 +112,7 @@ async def health():
     return {"status": "healthy", "model_loaded": pipe is not None}
 
 @app.post("/generate", response_model=GenerationResponse)
-async def generate_image(request: GenerationRequest):
+async def generate_image(request: GenerationRequest, auth: bool = Depends(verify_api_key)):
     """Generate image from text prompt"""
     global pipe
 
