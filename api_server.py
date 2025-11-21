@@ -73,21 +73,15 @@ def load_model(model_path: str = "./models/flux-kontext-dev"):
     global pipe
 
     try:
-        # Try FluxKontextPipeline first, fallback to FluxPipeline
-        try:
-            from diffusers import FluxKontextPipeline
-            pipeline_class = FluxKontextPipeline
-            print("Using FluxKontextPipeline")
-        except ImportError:
-            from diffusers import FluxPipeline
-            pipeline_class = FluxPipeline
-            print("FluxKontextPipeline not available, using FluxPipeline")
+        from diffusers import FluxKontextPipeline
 
-        print(f"Loading FLUX Kontext model from {model_path}...")
+        print(f"Loading FLUX Kontext model...")
 
-        pipe = pipeline_class.from_pretrained(
-            model_path,
-            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        # Try loading from HuggingFace hub directly
+        pipe = FluxKontextPipeline.from_pretrained(
+            "black-forest-labs/FLUX.1-Kontext-dev",
+            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            cache_dir=model_path
         )
 
         if torch.cuda.is_available():
